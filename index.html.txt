@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>스마트 쓰레기통 동네 지도 (TrashFinder)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS & JS for Interactive Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- QRCode.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        #map {
+            width: 100%;
+            height: calc(100vh - 64px);
+            z-index: 1;
+        }
+        .leaflet-top.leaflet-left {
+            top: 70px;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans flex flex-col h-screen overflow-hidden">
+
+    <!-- Header Navigation -->
+    <header class="bg-emerald-600 text-white shadow-md z-20 flex justify-between items-center px-4 py-3 h-16 shrink-0">
+        <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-trash-can text-xl text-emerald-200"></i>
+            <h1 class="text-lg font-bold tracking-tight">클린맵 (TrashFinder)</h1>
+        </div>
+        <div class="flex items-center space-x-2">
+            <!-- QR Code Button -->
+            <button onclick="openQrModal()" class="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center space-x-1 shadow transition">
+                <i class="fa-solid fa-qrcode"></i>
+                <span class="hidden sm:inline">QR 공유</span>
+            </button>
+            <!-- Add Marker Button -->
+            <button onclick="enableAddMode()" id="addBtn" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center space-x-1 shadow transition">
+                <i class="fa-solid fa-plus"></i>
+                <span>제보하기</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Map & Floating Controls -->
+    <div class="relative flex-1 w-full h-full">
+        <!-- Leaflet Map Container -->
+        <div id="map"></div>
+
+        <!-- Filter Chips Bar (Top Floating) -->
+        <div class="absolute top-3 left-1/2 transform -translate-x-1/2 z-10 w-11/12 max-w-md flex space-x-2 overflow-x-auto no-scrollbar bg-white/90 backdrop-blur-md p-1.5 rounded-full shadow-lg border border-gray-100">
+            <button onclick="filterTrash('all')" id="filter-all" class="filter-btn active flex-1 py-1.5 px-3 text-xs font-bold rounded-full bg-emerald-600 text-white transition shadow-sm text-center whitespace-nowrap">
+                전체 보기
+            </button>
+            <button onclick="filterTrash('general')" id="filter-general" class="filter-btn flex-1 py-1.5 px-3 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition text-center whitespace-nowrap">
+                🗑️ 일반 쓰레기
+            </button>
+            <button onclick="filterTrash('recycle')" id="filter-recycle" class="filter-btn flex-1 py-1.5 px-3 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition text-center whitespace-nowrap">
+                ♻️ 재활용
+            </button>
+            <button onclick="filterTrash('food')" id="filter-food" class="filter-btn flex-1 py-1.5 px-3 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition text-center whitespace-nowrap">
+                🍌 음식물
+            </button>
+        </div>
+
+        <!-- Location Floating Button (Bottom Right) -->
+        <button onclick="moveToUserLocation()" class="absolute bottom-6 right-4 z-10 bg-white hover:bg-gray-50 text-emerald-600 p-3 rounded-full shadow-xl border border-gray-200 flex items-center justify-center transition transform active:scale-95" title="내 위치로 이동">
+            <i class="fa-solid fa-crosshairs text-xl"></i>
+        </button>
+
+        <!-- Mode Indicator Toast (Visible when adding location) -->
+        <div id="addNotice" class="hidden absolute top-16 left-1/2 transform -translate-x-1/2 z-10 bg-amber-500 text-white px-4 py-2 rounded-full shadow-lg text-sm font-semibold flex items-center space-x-2 animate-bounce">
+            <i class="fa-solid fa-hand-pointer"></i>
+            <span>지도를 클릭하여 쓰레기통 위치를 선택하세요</span>
+            <button onclick="cancelAddMode()" class="ml-2 text-amber-200 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="hidden fixed inset-0 bg-black/60 z-30 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl relative">
+            <button onclick="closeQrModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                <i class="fa-solid fa-qrcode text-2xl"></i>
+            </div>
+            <h3 class="text-lg font-bold text-gray-900 mb-1">모바일 접속용 QR 코드</h3>
+            <p class="text-xs text-gray-500 mb-4">스마트폰 카메라로 아래 QR을 스캔하면 이 웹사이트로 이동합니다.</p>
+            
+            <div class="flex justify-center p-4 bg-gray-50 rounded-xl mb-4 border border-gray-100">
+                <div id="qrcode"></div>
+            </div>
+
+            <p id="qrUrlText" class="text-xs text-gray-400 truncate mb-4 bg-gray-100 p-2 rounded"></p>
+
+            <button onclick="copyCurrentUrl()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-xl transition text-sm flex items-center justify-center space-x-2">
+                <i class="fa-regular fa-copy"></i>
+                <span>링크 주소 복사하기</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Add Trash Can Modal -->
+    <div id="addModal" class="hidden fixed inset-0 bg-black/60 z-30 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <button onclick="closeAddModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center space-x-2">
+                <i class="fa-solid fa-map-pin text-amber-500"></i>
+                <span>새 쓰레기통 제보하기</span>
+            </h3>
+            
+            <form id="trashForm" onsubmit="saveNewTrash(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">쓰레기통 종류</label>
+                    <select id="trashType" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <option value="general">🗑️ 일반 쓰레기</option>
+                        <option value="recycle">♻️ 재활용 분리수거함</option>
+                        <option value="food">🍌 음식물 쓰레기통</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">상세 위치 설명 / 특징</label>
+                    <input type="text" id="trashTitle" required placeholder="예: 버스정류장 옆, 편의점 입구" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">추가 메모 (선택)</label>
+                    <textarea id="trashNote" rows="2" placeholder="청결 상태, 비고 등" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
+                </div>
+
+                <div class="pt-2 flex space-x-2">
+                    <button type="button" onclick="closeAddModal()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-200">취소</button>
+                    <button type="submit" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white py-2.5 rounded-xl font-medium text-sm shadow">등록하기</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="hidden fixed bottom-20 left-1/2 transform -translate-x-1/2 z-40 bg-gray-900 text-white text-xs px-4 py-2.5 rounded-full shadow-2xl flex items-center space-x-2 opacity-0 transition-opacity duration-300">
+        <span id="toastMsg"></span>
+    </div>
+
+    <!-- Main Logic Script -->
+    <script>
+        let map;
+        let userMarker = null;
+        let userCoords = { lat: 37.5665, lng: 126.9780 };
+        let trashMarkers = [];
+        let isAddingMode = false;
+        let pendingCoords = null;
+
+        // Sample initial markers
+        let trashData = [
+            { id: 1, lat: 37.5672, lng: 126.9785, type: 'general', title: '시청역 5번 출구 앞', note: '일반 쓰레기 전용' },
+            { id: 2, lat: 37.5658, lng: 126.9772, type: 'recycle', title: '덕수궁 돌담길 입구', note: '캔, 페트병 분리수거함' },
+            { id: 3, lat: 37.5661, lng: 126.9798, type: 'food', title: '무교동 음식문화거리', note: '음식물 수거함 (NFC)' }
+        ];
+
+        const createCustomIcon = (type) => {
+            let color = '#4B5563';
+            let iconClass = 'fa-trash';
+
+            if (type === 'recycle') {
+                color = '#10B981';
+                iconClass = 'fa-recycle';
+            } else if (type === 'food') {
+                color = '#F59E0B';
+                iconClass = 'fa-apple-whole';
+            }
+
+            const svgHtml = `
+                <div style="background-color: ${color};" class="w-9 h-9 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white text-base">
+                    <i class="fa-solid ${iconClass}"></i>
+                </div>
+            `;
+            return L.divIcon({
+                html: svgHtml,
+                className: '',
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+                popupAnchor: [0, -18]
+            });
+        };
+
+        const userIcon = L.divIcon({
+            html: `
+                <div class="relative flex items-center justify-center w-6 h-6">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-4 w-4 bg-blue-600 border-2 border-white shadow-md"></span>
+                </div>
+            `,
+            className: '',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
+
+        window.onload = function() {
+            map = L.map('map', { zoomControl: false }).setView([userCoords.lat, userCoords.lng], 16);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(map);
+
+            L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+            const localData = localStorage.getItem('trashData');
+            if (localData) {
+                try { trashData = JSON.parse(localData); } catch(e) {}
+            }
+
+            map.on('click', function(e) {
+                if (isAddingMode) {
+                    pendingCoords = e.latlng;
+                    cancelAddMode();
+                    document.getElementById('addModal').classList.remove('hidden');
+                }
+            });
+
+            getUserLocation();
+            renderMarkers('all');
+        };
+
+        function getUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                        map.setView([userCoords.lat, userCoords.lng], 16);
+                        
+                        if (userMarker) {
+                            userMarker.setLatLng([userCoords.lat, userCoords.lng]);
+                        } else {
+                            userMarker = L.marker([userCoords.lat, userCoords.lng], { icon: userIcon }).addTo(map).bindPopup("<b>현재 위치</b>");
+                        }
+                        renderMarkers('all');
+                    },
+                    (error) => { showToast("위치 권한을 허용하면 주변 쓰레기통과의 거리를 확인할 수 있습니다."); },
+                    { enableHighAccuracy: true, timeout: 5000 }
+                );
+            }
+        }
+
+        function moveToUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    userCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                    if (userMarker) userMarker.setLatLng([userCoords.lat, userCoords.lng]);
+                    map.flyTo([userCoords.lat, userCoords.lng], 17);
+                });
+            }
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            const d = R * c;
+            return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
+        }
+
+        function renderMarkers(filterType = 'all') {
+            trashMarkers.forEach(m => map.removeLayer(m));
+            trashMarkers = [];
+
+            trashData.forEach(item => {
+                if (filterType === 'all' || item.type === filterType) {
+                    const distStr = calculateDistance(userCoords.lat, userCoords.lng, item.lat, item.lng);
+                    let typeBadge = item.type === 'general' ? '🗑️ 일반' : (item.type === 'recycle' ? '♻️ 재활용' : '🍌 음식물');
+
+                    const popupContent = `
+                        <div class="p-1 max-w-[200px]">
+                            <div class="flex items-center justify-between gap-1 mb-1">
+                                <span class="bg-gray-100 text-gray-700 text-[10px] px-2 py-0.5 rounded font-bold">${typeBadge}</span>
+                                <span class="text-xs font-bold text-emerald-600"><i class="fa-solid fa-person-walking mr-1"></i>${distStr}</span>
+                            </div>
+                            <h4 class="font-bold text-sm text-gray-800 mb-1 leading-snug">${item.title}</h4>
+                            <p class="text-xs text-gray-500">${item.note || '설명 없음'}</p>
+                        </div>
+                    `;
+
+                    const marker = L.marker([item.lat, item.lng], { icon: createCustomIcon(item.type) }).bindPopup(popupContent);
+                    marker.addTo(map);
+                    trashMarkers.push(marker);
+                }
+            });
+        }
+
+        function filterTrash(type) {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('bg-emerald-600', 'text-white');
+                btn.classList.add('bg-gray-100', 'text-gray-700');
+            });
+            const activeBtn = document.getElementById(`filter-${type}`);
+            if (activeBtn) {
+                activeBtn.classList.remove('bg-gray-100', 'text-gray-700');
+                activeBtn.classList.add('bg-emerald-600', 'text-white');
+            }
+            renderMarkers(type);
+        }
+
+        function enableAddMode() {
+            isAddingMode = true;
+            document.getElementById('addNotice').classList.remove('hidden');
+        }
+
+        function cancelAddMode() {
+            isAddingMode = false;
+            document.getElementById('addNotice').classList.add('hidden');
+        }
+
+        function closeAddModal() {
+            document.getElementById('addModal').classList.add('hidden');
+            pendingCoords = null;
+        }
+
+        function saveNewTrash(e) {
+            e.preventDefault();
+            if (!pendingCoords) return;
+
+            const newItem = {
+                id: Date.now(),
+                lat: pendingCoords.lat,
+                lng: pendingCoords.lng,
+                type: document.getElementById('trashType').value,
+                title: document.getElementById('trashTitle').value,
+                note: document.getElementById('trashNote').value
+            };
+
+            trashData.push(newItem);
+            localStorage.setItem('trashData', JSON.stringify(trashData));
+            renderMarkers('all');
+            closeAddModal();
+            showToast("새 쓰레기통이 지도에 추가되었습니다!");
+        }
+
+        function openQrModal() {
+            const url = window.location.href;
+            document.getElementById('qrUrlText').innerText = url;
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = "";
+            new QRCode(qrContainer, { text: url, width: 150, height: 150, colorDark: "#059669" });
+            document.getElementById('qrModal').classList.remove('hidden');
+        }
+
+        function closeQrModal() {
+            document.getElementById('qrModal').classList.add('hidden');
+        }
+
+        function copyCurrentUrl() {
+            const url = window.location.href;
+            const textArea = document.createElement("textarea");
+            textArea.value = url;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            showToast("웹사이트 주소가 복사되었습니다!");
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.remove('opacity-0'), 10);
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
